@@ -1173,8 +1173,7 @@ async def _handle_work(message, user_id, text):
                     reply_text += f"🐾 {_zone_text(red)}. Если очень хочется праздника. А завтра продолжим как обычно\n\n"
                 if not any(bool(d and d.get("dish")) for d in (green, yellow, red)):
                     reply_text += "В этом меню не нашлось ничего подходящего. Напиши блюдо словами — посчитаю сам.\n\n"
-                reply_text += ("Напиши, что выбрал: название блюда, номер варианта («1», «2», «3») "
-                               "или «нет», если передумал.")
+                reply_text += ("Напиши, что выбрал, — посчитаю. Или «нет», если передумал.")
                 await message.answer(reply_text)
             return
 
@@ -1253,16 +1252,9 @@ async def _handle_work(message, user_id, text):
                     await message.answer("Не смог посчитать. Попробуй написать вес (например 200 г).")
                 return
             _active_menu.pop(user_id, None)
-            _pending_clarification[user_id] = {
-                "original_text": text,
-                "dish": text,
-                "questions": ["🐾 Такого блюда я в меню не нашёл. Записать его отдельно? да/нет"],
-                "answers": [],
-                "current_index": 0,
-                "is_fix": False,
-                "is_menu_confirm": True
-            }
-            await message.answer(f"🐾 Такого блюда я в меню не нашёл. Записать «{_esc(text)}» отдельно? да/нет")
+            _pending_menu_mode.pop(user_id, None)
+            await message.answer("Похоже, этого нет в меню. Давай запишем просто как еду 🐾")
+            await _handle_work(message, user_id, text)
             return
 
     if message.photo:
