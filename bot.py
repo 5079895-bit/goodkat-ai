@@ -323,6 +323,40 @@ def _sugar_kind(text: str) -> str:
     return "spoon"
 
 
+_DRINK_WORDS = ("кофе", "капучино", "латте", "американо", "эспрессо", "флэт", "раф",
+                "чай", "сок", "кола", "лимонад", "вода", "вино", "пиво", "компот",
+                "коктейль", "какао", "смузи", "бабл", "морс", "квас", "милкшейк")
+
+def _is_drink_name(name: str) -> bool:
+    low = (name or "").lower()
+    return any(w in low for w in _DRINK_WORDS)
+
+def _fix_menu_variant(v):
+    """В варианте не больше одного напитка и без повторов позиций."""
+    if not isinstance(v, dict):
+        return v
+    items = [dict(i) for i in (v.get("items") or []) if isinstance(i, dict)]
+    if not items:
+        return v
+    seen_names, kept, seen_drink = set(), [], False
+    for it in items:
+        nm = _normalize(it.get("name") or "")
+        if not nm or nm in seen_names:
+            continue
+        if _is_drink_name(nm):
+            if seen_drink:
+                continue
+            seen_drink = True
+        seen_names.add(nm)
+        kept.append(it)
+    if len(kept) == len(items):
+        return v
+    out = dict(v)
+    out["items"] = kept
+    out["dish"] = " + ".join(str(i.get("name") or "") for i in kept)
+    out["calories"] = sum(int(float(i.get("calories") or 0)) for i in kept)
+    return out
+
 def _zone_choice(raw: str):
     """Какой из трёх вариантов выбрал человек: номер, цвет или слово."""
     t = (raw or "").lower().replace("ё", "е").strip()
@@ -1110,20 +1144,25 @@ async def _handle_work(message, user_id, text):
                 reply_text += "🐾 Если что-то присмотрел — напиши, я запишу. Или напиши \"нет\", если передумал"
                 await message.answer(reply_text)
             else:
-                green = menu_res.get("green")
-                yellow = menu_res.get("yellow")
-                red = menu_res.get("red")
+                green = _fix_menu_variant(menu_res.get("green"))
+                yellow = _fix_menu_variant(menu_res.get("yellow"))
+                red = _fix_menu_variant(menu_res.get("red"))
                 if red and (
                     not red.get("dish")
                     or int(red.get("calories") or 0) > 2500
                     or str(red.get("dish")).count(" + ") > 1
                 ):
                     red = None
-                all_dishes = []
+                all_dishes, all_items = [], []
                 for d in (green, yellow, red):
                     if d and d.get("dish"):
                         all_dishes.append(d["dish"])
-                _active_menu[user_id] = {"week": 2, "green": green, "yellow": yellow, "red": red, "all_dishes": all_dishes}
+                        for it in (d.get("items") or []):
+                            nm = str(it.get("name") or "").strip()
+                            if nm:
+                                all_items.append({"name": nm, "dish": d})
+                _active_menu[user_id] = {"week": 2, "green": green, "yellow": yellow, "red": red,
+                                         "all_dishes": all_dishes, "all_items": all_items}
 
                 reply_text = "🐾 Вот что могу предложить:\n\n"
                 if green and green.get("dish"):
@@ -1170,7 +1209,34 @@ async def _handle_work(message, user_id, text):
             return
         else:
             all_dishes = menu_data.get("all_dishes", [])
+            all_items = menu_data.get("all_items", [])
             norm_text = _normalize(text)
+
+            # сначала точное совпадение с одной позицией — «записал одно блюдо» значит одно
+            single = None
+            for it in all_items:
+                if _normalize(it.get("name", "")) == norm_text:
+                    single = it
+                    break
+            if not single and norm_text:
+                # человек написал коротко («грудка») — понимаем, о какой позиции речь;
+                # но «борщ и салат» не схлопываем в одно блюдо
+                candidates = [it for it in all_items
+                              if norm_text in _normalize(it.get("name", ""))]
+                if candidates:
+                    single = min(candidates, key=lambda it: len(it.get("name", "")))
+            if single:
+                _active_menu.pop(user_id, None)
+                await message.answer("Секунду, считаю...")
+                name = single["name"]
+                food_data = await _ai(ai.calculate_nutrition, name, name)
+                if food_data and food_data.get('calories') is not None:
+                    await _save_food_and_reply(message, user_id, food_data, fallback_dish=name,
+                                               today_str=today_str, is_fix=False)
+                else:
+                    await message.answer("Не смог посчитать. Попробуй написать вес (например 200 г).")
+                return
+
             matched = None
             for d in all_dishes:
                 nd = _normalize(d)
