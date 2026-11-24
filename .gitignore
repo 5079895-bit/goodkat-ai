@@ -1,0 +1,26 @@
+# Секреты и настройки — никогда не в репозиторий
+.env
+.env.local
+
+# База данных и её копии
+*.db
+*.db-*
+bot_database*
+
+# Логи и служебные файлы
+*.log
+__pycache__/
+*.pyc
+downloads/
+
+# Резервные копии и рабочие черновики
+*.bak*
+*.bak-*
+*_orig.py
+patch_batch*.py
+repro.py
+
+# Тестовые картинки, архивы, зависимости
+test_food.jpg
+*.zip
+vendor
